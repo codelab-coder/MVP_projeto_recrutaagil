@@ -1,8 +1,3 @@
-/**
- * RecrutÁgil - Backend Production Ready
- * Node.js + Express + MongoDB Atlas + Render
- */
-
 require("dotenv").config();
 
 const express = require("express");
@@ -16,56 +11,40 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(cors());
 
-// ====================== ENV VALIDATION ======================
-
+// ====================== ENV CHECK ======================
 if (!process.env.MONGO_URI) {
-  console.error("❌ MONGO_URI não definida no .env");
+  console.error("❌ MONGO_URI não definida");
   process.exit(1);
 }
 
 if (!process.env.JWT_SECRET) {
-  console.error("❌ JWT_SECRET não definida no .env");
+  console.error("❌ JWT_SECRET não definida");
   process.exit(1);
 }
 
-// ====================== MONGODB (PRODUCTION SAFE) ======================
-
-const connectMongo = async () => {
+// ====================== MONGO CONNECTION (ROBUSTO) ======================
+async function connectDB() {
   try {
     await mongoose.connect(process.env.MONGO_URI, {
       serverSelectionTimeoutMS: 10000,
       maxPoolSize: 10,
     });
 
-    console.log("✅ MongoDB conectado com sucesso");
+    console.log("✅ MongoDB conectado");
   } catch (err) {
-    console.error("❌ Erro MongoDB:", err.message);
-
-    // 🔥 Render-friendly: retry infinito com delay
-    setTimeout(connectMongo, 5000);
+    console.log("❌ erro MongoDB:", err.message);
+    setTimeout(connectDB, 5000);
   }
-};
+}
 
-connectMongo();
+connectDB();
 
-// evita crash por desconexão
 mongoose.connection.on("disconnected", () => {
-  console.log("⚠️ MongoDB desconectado. Reconectando...");
-  connectMongo();
+  console.log("⚠️ MongoDB caiu, reconectando...");
+  connectDB();
 });
 
-// ====================== HEALTH CHECK (Render obrigatório) ======================
-
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "ok",
-    db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-    time: new Date().toISOString(),
-  });
-});
-
-// ====================== MODELS ======================
-
+// ====================== MODELO ======================
 const usuarioSchema = new mongoose.Schema({
   nome: String,
   email: { type: String, unique: true },
@@ -76,12 +55,35 @@ const usuarioSchema = new mongoose.Schema({
 
 const Usuario = mongoose.model("Usuario", usuarioSchema);
 
-// ====================== AUTH ======================
+// ====================== HELPERS ======================
+function sanitizeUser(user) {
+  return {
+    id: user._id,
+    nome: user.nome,
+    email: user.email,
+    tipo_usuario: user.tipo_usuario,
+    criado_em: user.criado_em,
+  };
+}
 
+function generateToken(user) {
+  return jwt.sign(
+    {
+      id: user._id,
+      tipo_usuario: user.tipo_usuario,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+// ====================== AUTH MIDDLEWARE ======================
 function auth(req, res, next) {
   const header = req.headers.authorization;
 
-  if (!header) return res.status(401).json({ erro: "Token ausente" });
+  if (!header) {
+    return res.status(401).json({ erro: "Token ausente" });
+  }
 
   try {
     const token = header.split(" ")[1];
@@ -93,14 +95,24 @@ function auth(req, res, next) {
   }
 }
 
-// ====================== ROUTES ======================
+// ====================== HEALTH ======================
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    time: new Date().toISOString(),
+  });
+});
 
+// ====================== CADASTRO ======================
 app.post("/auth/cadastro-estudante", async (req, res) => {
   try {
     const { nome, email, senha } = req.body;
 
     const exists = await Usuario.findOne({ email });
-    if (exists) return res.status(409).json({ erro: "Email já existe" });
+    if (exists) {
+      return res.status(409).json({ erro: "Email já existe" });
+    }
 
     const hash = await bcrypt.hash(senha, 10);
 
@@ -111,57 +123,93 @@ app.post("/auth/cadastro-estudante", async (req, res) => {
       tipo_usuario: "estudante",
     });
 
-    const token = jwt.sign(
-      { id: user._id, tipo: user.tipo_usuario },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = generateToken(user);
 
-    res.status(201).json({ user, token });
+    res.status(201).json({
+      token,
+      usuario: sanitizeUser(user),
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ erro: "Erro interno" });
+    res.status(500).json({ erro: "Erro interno servidor" });
   }
 });
 
+app.post("/auth/cadastro-empresa", async (req, res) => {
+  try {
+    const { nome, email, senha } = req.body;
+
+    const exists = await Usuario.findOne({ email });
+    if (exists) {
+      return res.status(409).json({ erro: "Email já existe" });
+    }
+
+    const hash = await bcrypt.hash(senha, 10);
+
+    const user = await Usuario.create({
+      nome,
+      email,
+      senha: hash,
+      tipo_usuario: "empresa",
+    });
+
+    const token = generateToken(user);
+
+    res.status(201).json({
+      token,
+      usuario: sanitizeUser(user),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro interno servidor" });
+  }
+});
+
+// ====================== LOGIN ======================
 app.post("/auth/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
 
     const user = await Usuario.findOne({ email });
-    if (!user) return res.status(401).json({ erro: "Inválido" });
+
+    if (!user) {
+      return res.status(401).json({ erro: "Credenciais inválidas" });
+    }
 
     const ok = await bcrypt.compare(senha, user.senha);
-    if (!ok) return res.status(401).json({ erro: "Inválido" });
 
-    const token = jwt.sign(
-      { id: user._id, tipo: user.tipo_usuario },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    if (!ok) {
+      return res.status(401).json({ erro: "Credenciais inválidas" });
+    }
 
-    res.json({ user, token });
+    const token = generateToken(user);
+
+    res.json({
+      token,
+      usuario: sanitizeUser(user),
+    });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ erro: "Erro login" });
   }
 });
 
+// ====================== ME ======================
 app.get("/me", auth, async (req, res) => {
   const user = await Usuario.findById(req.user.id);
-  res.json(user);
-});
 
-// ====================== GLOBAL ERROR HANDLER ======================
+  if (!user) {
+    return res.status(404).json({ erro: "Usuário não encontrado" });
+  }
 
-app.use((err, req, res, next) => {
-  console.error("🔥 ERRO GLOBAL:", err);
-  res.status(500).json({ erro: "Erro interno servidor" });
+  res.json({
+    usuario: sanitizeUser(user),
+  });
 });
 
 // ====================== START ======================
-
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Backend rodando na porta ${PORT}`);
+  console.log(`🚀 RecrutÁgil rodando na porta ${PORT}`);
 });
