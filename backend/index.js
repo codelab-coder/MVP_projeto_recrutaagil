@@ -23,16 +23,14 @@ const MONGO_URI =
   "mongodb://localhost:27017/recrutaagil";
 
 mongoose
-  .connect(MONGO_URI)
-  .then(() =>
-    console.log("✅ MongoDB conectado com sucesso")
-  )
-  .catch((err) =>
-    console.error(
-      "❌ Erro ao conectar MongoDB:",
-      err
-    )
-  );
+  .connect(MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+  })
+  .then(() => console.log("✅ MongoDB conectado"))
+  .catch((err) => {
+    console.error("❌ MongoDB erro:", err);
+    process.exit(1);
+  });
 
 // ====================== SCHEMAS ======================
 
