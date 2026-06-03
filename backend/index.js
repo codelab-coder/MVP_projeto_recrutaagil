@@ -6,7 +6,10 @@ const bcrypt     = require("bcryptjs");
 const jwt        = require("jsonwebtoken");
 const cors       = require("cors");
 const rateLimit  = require("express-rate-limit");
-const helmet     = require("helmet");
+const helmet      = require("helmet");
+const multer      = require("multer");
+const streamifier = require("streamifier");
+const cloudinary  = require("cloudinary").v2;
 
 const app = express();
 
@@ -17,7 +20,7 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
-app.use(express.json({ limit: "5mb" })); // imagens base64 do perfil
+app.use(express.json({ limit: "1mb" }));
 
 // Rate limiting global
 const limiter = rateLimit({
@@ -37,10 +40,42 @@ const authLimiter = rateLimit({
 });
 
 // ====================== ENV CHECK ======================
-const requiredEnvs = ["MONGO_URI", "JWT_SECRET"];
+const requiredEnvs = ["MONGO_URI", "JWT_SECRET", "CLOUDINARY_URL"];
 requiredEnvs.forEach(e => {
   if (!process.env[e]) { console.error(`❌ ${e} não definida`); process.exit(1); }
 });
+
+// ====================== CLOUDINARY + MULTER ======================
+// CLOUDINARY_URL no .env formato: cloudinary://api_key:api_secret@cloud_name
+cloudinary.config({ secure: true }); // lê CLOUDINARY_URL automaticamente
+
+// Multer em memória — sem disco, sem tmp files
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024 }, // 3 MB
+  fileFilter(req, file, cb) {
+    if (!file.mimetype.startsWith("image/"))
+      return cb(new Error("Apenas imagens são aceitas (jpeg, png, webp)"));
+    cb(null, true);
+  },
+});
+
+// Faz upload do buffer para o Cloudinary e retorna a URL segura
+function uploadParaCloudinary(buffer, folder, publicId) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        public_id:       publicId,
+        overwrite:       true,
+        resource_type:   "image",
+        transformation:  [{ width: 400, height: 400, crop: "fill", gravity: "face", quality: "auto:good", fetch_format: "auto" }],
+      },
+      (err, result) => (err ? reject(err) : resolve(result.secure_url))
+    );
+    streamifier.createReadStream(buffer).pipe(stream);
+  });
+}
 
 // ====================== DB CONNECTION ======================
 async function connectDB() {
@@ -96,7 +131,7 @@ const estudanteSchema = new mongoose.Schema({
   areas:       { type: String, default: "" },
   bio:         { type: String, default: "", maxlength: 1000 },
   skills:      { type: [String], default: [] },
-  foto:        { type: String, default: "" }, // base64 ou URL
+  foto:        { type: String, default: "" }, // URL Cloudinary
   disponivel:  { type: Boolean, default: true },
   projetos_portfolio: { type: [projetoPortfolioSchema], default: [] },
   atualizado_em: { type: Date, default: Date.now },
@@ -311,6 +346,84 @@ app.get("/health", (req, res) => {
   });
 });
 
+// ====================== UPLOAD DE FOTO ======================
+
+/**
+ * POST /upload/foto
+ * Multipart/form-data — campo: "foto" (arquivo de imagem)
+ * Faz upload para o Cloudinary e salva a URL no perfil do usuário.
+ * Funciona para estudante e empresa.
+ *
+ * Exemplo de uso no frontend:
+ *   const form = new FormData();
+ *   form.append("foto", fileInput.files[0]);
+ *   fetch("/upload/foto", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+ */
+app.post(
+  "/upload/foto",
+  auth,
+  upload.single("foto"),
+  async (req, res) => {
+    try {
+      if (!req.file)
+        return res.status(400).json({ erro: "Nenhuma imagem enviada. Use o campo 'foto'." });
+
+      const folder   = `recrutagil/${req.user.tipo_usuario}s`;
+      const publicId = String(req.user.id); // sobrescreve sempre, um arquivo por usuário
+
+      const url = await uploadParaCloudinary(req.file.buffer, folder, publicId);
+
+      // Persiste a URL no perfil correto
+      if (req.user.tipo_usuario === "estudante") {
+        await Estudante.findOneAndUpdate(
+          { usuario_id: req.user.id },
+          { $set: { foto: url, atualizado_em: new Date() } },
+          { upsert: true }
+        );
+      } else {
+        await Empresa.findOneAndUpdate(
+          { usuario_id: req.user.id },
+          { $set: { foto: url, atualizado_em: new Date() } },
+          { upsert: true }
+        );
+      }
+
+      res.json({ url });
+    } catch (err) {
+      console.error("upload/foto:", err);
+      // Erros de validação do multer (tipo/tamanho)
+      if (err.message?.includes("imagens") || err.code === "LIMIT_FILE_SIZE")
+        return res.status(400).json({ erro: err.message || "Arquivo muito grande. Máximo: 3 MB." });
+      res.status(500).json({ erro: "Erro ao fazer upload da imagem." });
+    }
+  }
+);
+
+/**
+ * DELETE /upload/foto
+ * Remove a foto de perfil do usuário (Cloudinary + banco)
+ */
+app.delete("/upload/foto", auth, async (req, res) => {
+  try {
+    const folder   = `recrutagil/${req.user.tipo_usuario}s`;
+    const publicId = `${folder}/${req.user.id}`;
+
+    // Tenta remover do Cloudinary (ignora erro se não existir)
+    await cloudinary.uploader.destroy(publicId).catch(() => {});
+
+    if (req.user.tipo_usuario === "estudante") {
+      await Estudante.findOneAndUpdate({ usuario_id: req.user.id }, { $set: { foto: "" } });
+    } else {
+      await Empresa.findOneAndUpdate({ usuario_id: req.user.id }, { $set: { foto: "" } });
+    }
+
+    res.json({ mensagem: "Foto removida com sucesso." });
+  } catch (err) {
+    console.error("delete/foto:", err);
+    res.status(500).json({ erro: "Erro ao remover foto." });
+  }
+});
+
 // ====================== AUTH ======================
 
 /**
@@ -473,7 +586,8 @@ app.put("/estudante/perfil", auth, soEstudante, async (req, res) => {
     const camposPermitidos = [
       "telefone", "faculdade", "curso", "semestre", "cidade",
       "linkedin", "portfolio", "github", "areas", "bio",
-      "skills", "disponivel", "foto",
+      "skills", "disponivel",
+      // "foto" é gerenciado exclusivamente via POST /upload/foto
     ];
     const update = {};
     camposPermitidos.forEach(c => {
@@ -563,7 +677,8 @@ app.get("/empresa/perfil", auth, soEmpresa, async (req, res) => {
 
 app.put("/empresa/perfil", auth, soEmpresa, async (req, res) => {
   try {
-    const campos = ["nome_empresa", "responsavel", "telefone", "cnpj", "segmento", "tamanho", "foto"];
+    const campos = ["nome_empresa", "responsavel", "telefone", "cnpj", "segmento", "tamanho"];
+    // "foto" é gerenciado exclusivamente via POST /upload/foto
     const update = {};
     campos.forEach(c => { if (req.body[c] !== undefined) update[c] = req.body[c]; });
     update.atualizado_em = new Date();
