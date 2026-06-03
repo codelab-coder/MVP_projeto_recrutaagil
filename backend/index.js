@@ -22,9 +22,8 @@ app.use(cors({
 }));
 app.use(express.json({ limit: "1mb" }));
 
-// Rate limiting global
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
+  windowMs: 15 * 60 * 1000,
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
@@ -32,7 +31,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Rate limiting mais restrito para auth
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -46,13 +44,11 @@ requiredEnvs.forEach(e => {
 });
 
 // ====================== CLOUDINARY + MULTER ======================
-// CLOUDINARY_URL no .env formato: cloudinary://api_key:api_secret@cloud_name
-cloudinary.config({ secure: true }); // lê CLOUDINARY_URL automaticamente
+cloudinary.config({ secure: true });
 
-// Multer em memória — sem disco, sem tmp files
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 3 * 1024 * 1024 }, // 3 MB
+  limits: { fileSize: 3 * 1024 * 1024 },
   fileFilter(req, file, cb) {
     if (!file.mimetype.startsWith("image/"))
       return cb(new Error("Apenas imagens são aceitas (jpeg, png, webp)"));
@@ -60,7 +56,6 @@ const upload = multer({
   },
 });
 
-// Faz upload do buffer para o Cloudinary e retorna a URL segura
 function uploadParaCloudinary(buffer, folder, publicId) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -108,7 +103,6 @@ const usuarioSchema = new mongoose.Schema({
 });
 usuarioSchema.index({ email: 1 });
 
-// ── Estudante ──────────────────────────────────────────────
 const projetoPortfolioSchema = new mongoose.Schema({
   nome:         { type: String, required: true, trim: true },
   descricao:    { type: String, default: "" },
@@ -131,7 +125,7 @@ const estudanteSchema = new mongoose.Schema({
   areas:       { type: String, default: "" },
   bio:         { type: String, default: "", maxlength: 1000 },
   skills:      { type: [String], default: [] },
-  foto:        { type: String, default: "" }, // URL Cloudinary
+  foto:        { type: String, default: "" },
   disponivel:  { type: Boolean, default: true },
   projetos_portfolio: { type: [projetoPortfolioSchema], default: [] },
   atualizado_em: { type: Date, default: Date.now },
@@ -140,7 +134,6 @@ estudanteSchema.index({ skills: 1 });
 estudanteSchema.index({ cidade: 1 });
 estudanteSchema.index({ disponivel: 1 });
 
-// ── Empresa ────────────────────────────────────────────────
 const empresaSchema = new mongoose.Schema({
   usuario_id:   { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true, unique: true },
   nome_empresa: { type: String, default: "" },
@@ -153,7 +146,6 @@ const empresaSchema = new mongoose.Schema({
   atualizado_em: { type: Date, default: Date.now },
 });
 
-// ── Oportunidade ───────────────────────────────────────────
 const oportunidadeSchema = new mongoose.Schema({
   empresa_id:  { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
   titulo:      { type: String, required: true, trim: true, maxlength: 200 },
@@ -170,7 +162,6 @@ const oportunidadeSchema = new mongoose.Schema({
 oportunidadeSchema.index({ ativa: 1, criado_em: -1 });
 oportunidadeSchema.index({ empresa_id: 1 });
 
-// ── Candidatura ────────────────────────────────────────────
 const candidaturaSchema = new mongoose.Schema({
   oportunidade_id: { type: mongoose.Schema.Types.ObjectId, ref: "Oportunidade", required: true },
   estudante_id:    { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
@@ -187,8 +178,6 @@ const candidaturaSchema = new mongoose.Schema({
 candidaturaSchema.index({ oportunidade_id: 1, estudante_id: 1 }, { unique: true });
 candidaturaSchema.index({ estudante_id: 1, status: 1 });
 
-// ── Interesse empresa → estudante (BuscaTalentos) ──────────
-// Separado de candidatura: a empresa demonstra interesse num estudante diretamente
 const interesseSchema = new mongoose.Schema({
   empresa_id:   { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
   estudante_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
@@ -200,13 +189,12 @@ const interesseSchema = new mongoose.Schema({
 interesseSchema.index({ empresa_id: 1, estudante_id: 1 }, { unique: true });
 interesseSchema.index({ estudante_id: 1, status: 1 });
 
-// ── Avaliação ──────────────────────────────────────────────
 const avaliacaoSchema = new mongoose.Schema({
   candidatura_id: { type: mongoose.Schema.Types.ObjectId, ref: "Candidatura", required: true },
   avaliador_id:   { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
   avaliado_id:    { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
   tipo:           { type: String, enum: ["empresa_avalia_estudante", "estudante_avalia_empresa"], required: true },
-  ratings:        { type: Map, of: Number, default: {} }, // critérios individuais
+  ratings:        { type: Map, of: Number, default: {} },
   nota:           { type: Number, min: 1, max: 5, required: true },
   comentario:     { type: String, default: "" },
   criado_em:      { type: Date, default: Date.now },
@@ -214,7 +202,6 @@ const avaliacaoSchema = new mongoose.Schema({
 avaliacaoSchema.index({ avaliado_id: 1 });
 avaliacaoSchema.index({ candidatura_id: 1, avaliador_id: 1 }, { unique: true });
 
-// ── Pesquisa de Satisfação ─────────────────────────────────
 const pesquisaSchema = new mongoose.Schema({
   candidatura_id: { type: mongoose.Schema.Types.ObjectId, ref: "Candidatura", required: true, unique: true },
   empresa_id:     { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
@@ -226,18 +213,16 @@ const pesquisaSchema = new mongoose.Schema({
   criado_em: { type: Date, default: Date.now },
 });
 
-// ── Notificação ────────────────────────────────────────────
 const notificacaoSchema = new mongoose.Schema({
   usuario_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
   icon:       { type: String, default: "🔔" },
   texto:      { type: String, required: true, maxlength: 300 },
   lida:       { type: Boolean, default: false },
-  link:       { type: String, default: "" }, // rota do frontend
+  link:       { type: String, default: "" },
   criado_em:  { type: Date, default: Date.now },
 });
 notificacaoSchema.index({ usuario_id: 1, lida: 1, criado_em: -1 });
 
-// ── Termo de Projeto ───────────────────────────────────────
 const termoSchema = new mongoose.Schema({
   candidatura_id: { type: mongoose.Schema.Types.ObjectId, ref: "Candidatura", required: true, unique: true },
   empresa_id:     { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
@@ -254,6 +239,25 @@ const termoSchema = new mongoose.Schema({
   criado_em: { type: Date, default: Date.now },
 });
 
+const mensagemSchema = new mongoose.Schema({
+  conversa_id:     { type: String, required: true, index: true },
+  remetente_id:    { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
+  destinatario_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
+  texto:           { type: String, required: true, maxlength: 2000, trim: true },
+  lida:            { type: Boolean, default: false },
+  criado_em:       { type: Date, default: Date.now },
+});
+mensagemSchema.index({ conversa_id: 1, criado_em: 1 });
+mensagemSchema.index({ destinatario_id: 1, lida: 1 });
+
+// ── NOVO: Schema de Bloqueio ───────────────────────────────
+const bloqueioSchema = new mongoose.Schema({
+  bloqueador_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
+  bloqueado_id:  { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
+  criado_em:     { type: Date, default: Date.now },
+});
+bloqueioSchema.index({ bloqueador_id: 1, bloqueado_id: 1 }, { unique: true });
+
 // ── Models ─────────────────────────────────────────────────
 const Usuario      = mongoose.model("Usuario",      usuarioSchema);
 const Estudante    = mongoose.model("Estudante",    estudanteSchema);
@@ -265,6 +269,8 @@ const Avaliacao    = mongoose.model("Avaliacao",    avaliacaoSchema);
 const Pesquisa     = mongoose.model("Pesquisa",     pesquisaSchema);
 const Notificacao  = mongoose.model("Notificacao",  notificacaoSchema);
 const Termo        = mongoose.model("Termo",        termoSchema);
+const Mensagem     = mongoose.model("Mensagem",     mensagemSchema);
+const Bloqueio     = mongoose.model("Bloqueio",     bloqueioSchema);
 
 // ====================== HELPERS ======================
 
@@ -286,7 +292,6 @@ function generateToken(user) {
   );
 }
 
-// Calcula média de notas de avaliações
 function calcMedia(avaliacoes) {
   if (!avaliacoes.length) return null;
   return parseFloat(
@@ -294,7 +299,6 @@ function calcMedia(avaliacoes) {
   );
 }
 
-// Cria notificação de forma assíncrona sem bloquear a resposta
 async function criarNotificacao(usuario_id, icon, texto, link = "") {
   try {
     await Notificacao.create({ usuario_id, icon, texto, link });
@@ -303,7 +307,6 @@ async function criarNotificacao(usuario_id, icon, texto, link = "") {
   }
 }
 
-// Valida campos obrigatórios e retorna lista de faltantes
 function validarCampos(body, campos) {
   return campos.filter(c => !body[c] || String(body[c]).trim() === "");
 }
@@ -342,23 +345,12 @@ app.get("/health", (req, res) => {
     status: "ok",
     db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
     time: new Date().toISOString(),
-    version: "2.0.0",
+    version: "2.1.0",
   });
 });
 
 // ====================== UPLOAD DE FOTO ======================
 
-/**
- * POST /upload/foto
- * Multipart/form-data — campo: "foto" (arquivo de imagem)
- * Faz upload para o Cloudinary e salva a URL no perfil do usuário.
- * Funciona para estudante e empresa.
- *
- * Exemplo de uso no frontend:
- *   const form = new FormData();
- *   form.append("foto", fileInput.files[0]);
- *   fetch("/upload/foto", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
- */
 app.post(
   "/upload/foto",
   auth,
@@ -369,11 +361,10 @@ app.post(
         return res.status(400).json({ erro: "Nenhuma imagem enviada. Use o campo 'foto'." });
 
       const folder   = `recrutagil/${req.user.tipo_usuario}s`;
-      const publicId = String(req.user.id); // sobrescreve sempre, um arquivo por usuário
+      const publicId = String(req.user.id);
 
       const url = await uploadParaCloudinary(req.file.buffer, folder, publicId);
 
-      // Persiste a URL no perfil correto
       if (req.user.tipo_usuario === "estudante") {
         await Estudante.findOneAndUpdate(
           { usuario_id: req.user.id },
@@ -391,7 +382,6 @@ app.post(
       res.json({ url });
     } catch (err) {
       console.error("upload/foto:", err);
-      // Erros de validação do multer (tipo/tamanho)
       if (err.message?.includes("imagens") || err.code === "LIMIT_FILE_SIZE")
         return res.status(400).json({ erro: err.message || "Arquivo muito grande. Máximo: 3 MB." });
       res.status(500).json({ erro: "Erro ao fazer upload da imagem." });
@@ -399,16 +389,11 @@ app.post(
   }
 );
 
-/**
- * DELETE /upload/foto
- * Remove a foto de perfil do usuário (Cloudinary + banco)
- */
 app.delete("/upload/foto", auth, async (req, res) => {
   try {
     const folder   = `recrutagil/${req.user.tipo_usuario}s`;
     const publicId = `${folder}/${req.user.id}`;
 
-    // Tenta remover do Cloudinary (ignora erro se não existir)
     await cloudinary.uploader.destroy(publicId).catch(() => {});
 
     if (req.user.tipo_usuario === "estudante") {
@@ -426,10 +411,6 @@ app.delete("/upload/foto", auth, async (req, res) => {
 
 // ====================== AUTH ======================
 
-/**
- * POST /cadastro/estudante
- * Rota usada pelo frontend (CadEstudante)
- */
 app.post("/cadastro/estudante", authLimiter, async (req, res) => {
   try {
     const { nome, email, senha, telefone, faculdade, curso, semestre,
@@ -463,7 +444,6 @@ app.post("/cadastro/estudante", authLimiter, async (req, res) => {
       skills:      Array.isArray(skills) ? skills : [],
     });
 
-    // Notificação de boas-vindas
     await criarNotificacao(user._id, "🎉", "Bem-vindo ao RecrutÁgil! Complete seu perfil.", "perfil");
 
     res.status(201).json({ token: generateToken(user), usuario: sanitizeUser(user) });
@@ -473,10 +453,6 @@ app.post("/cadastro/estudante", authLimiter, async (req, res) => {
   }
 });
 
-/**
- * POST /cadastro/empresa
- * Rota usada pelo frontend (CadEmpresa)
- */
 app.post("/cadastro/empresa", authLimiter, async (req, res) => {
   try {
     const { nome, responsavel, email, senha, telefone, cnpj, segmento, tamanho } = req.body;
@@ -514,7 +490,6 @@ app.post("/cadastro/empresa", authLimiter, async (req, res) => {
   }
 });
 
-// Aliases para compatibilidade (rotas antigas)
 app.post("/auth/cadastro-estudante", authLimiter, (req, res) => {
   req.url = "/cadastro/estudante";
   app.handle(req, res);
@@ -524,9 +499,6 @@ app.post("/auth/cadastro-empresa", authLimiter, (req, res) => {
   app.handle(req, res);
 });
 
-/**
- * POST /auth/login
- */
 app.post("/auth/login", authLimiter, async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -547,10 +519,6 @@ app.post("/auth/login", authLimiter, async (req, res) => {
   }
 });
 
-/**
- * GET /me — dados completos do usuário logado (perfil + stats básicos)
- * Usado pelo frontend para hidratar o estado após reload
- */
 app.get("/me", auth, async (req, res) => {
   try {
     const user = await Usuario.findById(req.user.id);
@@ -569,7 +537,6 @@ app.get("/me", auth, async (req, res) => {
 
 // ====================== PERFIL ESTUDANTE ======================
 
-/** GET /estudante/perfil — perfil próprio */
 app.get("/estudante/perfil", auth, soEstudante, async (req, res) => {
   try {
     const perfil = await Estudante.findOne({ usuario_id: req.user.id }).lean();
@@ -580,14 +547,12 @@ app.get("/estudante/perfil", auth, soEstudante, async (req, res) => {
   }
 });
 
-/** PUT /estudante/perfil — atualiza perfil (inclui foto base64 e portfolio de projetos) */
 app.put("/estudante/perfil", auth, soEstudante, async (req, res) => {
   try {
     const camposPermitidos = [
       "telefone", "faculdade", "curso", "semestre", "cidade",
       "linkedin", "portfolio", "github", "areas", "bio",
       "skills", "disponivel",
-      // "foto" é gerenciado exclusivamente via POST /upload/foto
     ];
     const update = {};
     camposPermitidos.forEach(c => {
@@ -610,7 +575,6 @@ app.put("/estudante/perfil", auth, soEstudante, async (req, res) => {
   }
 });
 
-/** POST /estudante/perfil/projetos — adiciona projeto ao portfólio */
 app.post("/estudante/perfil/projetos", auth, soEstudante, async (req, res) => {
   try {
     const { nome, descricao, tecnologias, link, github } = req.body;
@@ -627,7 +591,6 @@ app.post("/estudante/perfil/projetos", auth, soEstudante, async (req, res) => {
   }
 });
 
-/** DELETE /estudante/perfil/projetos/:projetoId — remove projeto do portfólio */
 app.delete("/estudante/perfil/projetos/:projetoId", auth, soEstudante, async (req, res) => {
   try {
     const perfil = await Estudante.findOneAndUpdate(
@@ -641,14 +604,13 @@ app.delete("/estudante/perfil/projetos/:projetoId", auth, soEstudante, async (re
   }
 });
 
-/** GET /estudante/:id — perfil público de um estudante */
 app.get("/estudante/:id", auth, async (req, res) => {
   try {
     const user = await Usuario.findById(req.params.id);
     if (!user || user.tipo_usuario !== "estudante")
       return res.status(404).json({ erro: "Estudante não encontrado" });
 
-    const perfil    = await Estudante.findOne({ usuario_id: req.params.id }).lean();
+    const perfil     = await Estudante.findOne({ usuario_id: req.params.id }).lean();
     const avaliacoes = await Avaliacao.find({ avaliado_id: req.params.id })
       .sort({ criado_em: -1 }).limit(10).lean();
 
@@ -678,7 +640,6 @@ app.get("/empresa/perfil", auth, soEmpresa, async (req, res) => {
 app.put("/empresa/perfil", auth, soEmpresa, async (req, res) => {
   try {
     const campos = ["nome_empresa", "responsavel", "telefone", "cnpj", "segmento", "tamanho"];
-    // "foto" é gerenciado exclusivamente via POST /upload/foto
     const update = {};
     campos.forEach(c => { if (req.body[c] !== undefined) update[c] = req.body[c]; });
     update.atualizado_em = new Date();
@@ -697,14 +658,13 @@ app.put("/empresa/perfil", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/** GET /empresa/:id — perfil público de uma empresa */
 app.get("/empresa/:id", auth, async (req, res) => {
   try {
     const user = await Usuario.findById(req.params.id);
     if (!user || user.tipo_usuario !== "empresa")
       return res.status(404).json({ erro: "Empresa não encontrada" });
 
-    const perfil = await Empresa.findOne({ usuario_id: req.params.id }).lean();
+    const perfil     = await Empresa.findOne({ usuario_id: req.params.id }).lean();
     const avaliacoes = await Avaliacao.find({ avaliado_id: req.params.id })
       .sort({ criado_em: -1 }).limit(10).lean();
 
@@ -721,11 +681,6 @@ app.get("/empresa/:id", auth, async (req, res) => {
 
 // ====================== BUSCA DE TALENTOS ======================
 
-/**
- * GET /talentos
- * Query: skill, cidade, faculdade, area, disponivel, page, limit
- * Retorna estudantes com média de avaliação incluída
- */
 app.get("/talentos", auth, soEmpresa, async (req, res) => {
   try {
     const { skill, cidade, faculdade, area, page = 1, limit = 12 } = req.query;
@@ -736,17 +691,15 @@ app.get("/talentos", auth, soEmpresa, async (req, res) => {
     if (faculdade) filtro.faculdade = { $regex: faculdade, $options: "i" };
     if (area)      filtro.areas     = { $regex: area, $options: "i" };
 
-    const skip  = (parseInt(page) - 1) * parseInt(limit);
-    const total = await Estudante.countDocuments(filtro);
+    const skip   = (parseInt(page) - 1) * parseInt(limit);
+    const total  = await Estudante.countDocuments(filtro);
     const perfis = await Estudante.find(filtro)
       .skip(skip).limit(parseInt(limit)).lean();
 
-    // Enriquecer com dados do usuário
     const ids      = perfis.map(p => p.usuario_id);
     const usuarios = await Usuario.find({ _id: { $in: ids } }).lean();
     const usuMap   = Object.fromEntries(usuarios.map(u => [String(u._id), u]));
 
-    // Buscar médias de avaliação em batch
     const medias = await Avaliacao.aggregate([
       { $match: { avaliado_id: { $in: ids } } },
       { $group: { _id: "$avaliado_id", media: { $avg: "$nota" }, total: { $sum: 1 } } },
@@ -755,9 +708,8 @@ app.get("/talentos", auth, soEmpresa, async (req, res) => {
       medias.map(m => [String(m._id), { media: parseFloat(m.media.toFixed(1)), total: m.total }])
     );
 
-    // Verificar se já foi enviado interesse para cada estudante
     const interessesEnviados = await Interesse.find({
-      empresa_id: req.user.id,
+      empresa_id:   req.user.id,
       estudante_id: { $in: ids },
     }).lean();
     const interesseMap = Object.fromEntries(
@@ -780,13 +732,8 @@ app.get("/talentos", auth, soEmpresa, async (req, res) => {
   }
 });
 
-// ====================== INTERESSES (empresa → estudante) ======================
+// ====================== INTERESSES ======================
 
-/**
- * POST /interesses
- * Empresa demonstra interesse num estudante diretamente (BuscaTalentos)
- * Body: { estudante_id, mensagem? }
- */
 app.post("/interesses", auth, soEmpresa, async (req, res) => {
   try {
     const { estudante_id, mensagem } = req.body;
@@ -797,7 +744,7 @@ app.post("/interesses", auth, soEmpresa, async (req, res) => {
     if (!estudante || estudante.tipo_usuario !== "estudante")
       return res.status(404).json({ erro: "Estudante não encontrado" });
 
-    const empPerfil = await Empresa.findOne({ usuario_id: req.user.id }).lean();
+    const empPerfil   = await Empresa.findOne({ usuario_id: req.user.id }).lean();
     const nomeEmpresa = empPerfil?.nome_empresa || "Uma empresa";
 
     const interesse = await Interesse.create({
@@ -806,7 +753,6 @@ app.post("/interesses", auth, soEmpresa, async (req, res) => {
       mensagem:     mensagem || "",
     });
 
-    // Notifica o estudante
     await criarNotificacao(
       estudante_id,
       "💌",
@@ -823,9 +769,6 @@ app.post("/interesses", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/**
- * GET /interesses/recebidos — estudante vê interesses recebidos de empresas
- */
 app.get("/interesses/recebidos", auth, soEstudante, async (req, res) => {
   try {
     const interesses = await Interesse.find({ estudante_id: req.user.id })
@@ -854,11 +797,6 @@ app.get("/interesses/recebidos", auth, soEstudante, async (req, res) => {
   }
 });
 
-/**
- * PATCH /interesses/:id/responder
- * Estudante aceita ou recusa interesse de empresa
- * Body: { status: "aceito" | "recusado" }
- */
 app.patch("/interesses/:id/responder", auth, soEstudante, async (req, res) => {
   try {
     const { status } = req.body;
@@ -866,17 +804,16 @@ app.patch("/interesses/:id/responder", auth, soEstudante, async (req, res) => {
       return res.status(400).json({ erro: 'status deve ser "aceito" ou "recusado"' });
 
     const interesse = await Interesse.findOne({
-      _id: req.params.id,
+      _id:          req.params.id,
       estudante_id: req.user.id,
     });
     if (!interesse)
       return res.status(404).json({ erro: "Interesse não encontrado" });
 
-    interesse.status       = status;
+    interesse.status        = status;
     interesse.atualizado_em = new Date();
     await interesse.save();
 
-    // Notifica a empresa
     const estudante = await Usuario.findById(req.user.id);
     const nomeAcao  = status === "aceito" ? "aceitou" : "recusou";
     await criarNotificacao(
@@ -892,7 +829,6 @@ app.patch("/interesses/:id/responder", auth, soEstudante, async (req, res) => {
   }
 });
 
-/** GET /interesses/enviados — empresa vê interesses que enviou */
 app.get("/interesses/enviados", auth, soEmpresa, async (req, res) => {
   try {
     const interesses = await Interesse.find({ empresa_id: req.user.id })
@@ -924,7 +860,6 @@ app.get("/interesses/enviados", auth, soEmpresa, async (req, res) => {
 
 // ====================== OPORTUNIDADES ======================
 
-/** POST /oportunidades — empresa publica vaga */
 app.post("/oportunidades", auth, soEmpresa, async (req, res) => {
   try {
     const { titulo, descricao, escopo, responsavel, skills, prazo, modalidade, valor } = req.body;
@@ -951,11 +886,6 @@ app.post("/oportunidades", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/**
- * GET /oportunidades
- * Query: skill, modalidade, page, limit
- * Pública para usuários autenticados
- */
 app.get("/oportunidades", auth, async (req, res) => {
   try {
     const { skill, modalidade, page = 1, limit = 10 } = req.query;
@@ -971,12 +901,10 @@ app.get("/oportunidades", auth, async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Enriquecer com nome da empresa
-    const empIds  = ops.map(o => o.empresa_id);
+    const empIds   = ops.map(o => o.empresa_id);
     const empresas = await Empresa.find({ usuario_id: { $in: empIds } }).lean();
-    const empMap  = Object.fromEntries(empresas.map(e => [String(e.usuario_id), e]));
+    const empMap   = Object.fromEntries(empresas.map(e => [String(e.usuario_id), e]));
 
-    // Se for estudante, marcar quais já demonstrou interesse
     let interesseMap = {};
     if (req.user.tipo_usuario === "estudante") {
       const opIds = ops.map(o => o._id);
@@ -1001,14 +929,12 @@ app.get("/oportunidades", auth, async (req, res) => {
   }
 });
 
-/** GET /oportunidades/minhas — vagas da empresa logada */
 app.get("/oportunidades/minhas", auth, soEmpresa, async (req, res) => {
   try {
-    const ops = await Oportunidade.find({ empresa_id: req.user.id })
+    const ops   = await Oportunidade.find({ empresa_id: req.user.id })
       .sort({ criado_em: -1 }).lean();
 
-    // Contar candidatos por vaga em batch
-    const opIds = ops.map(o => o._id);
+    const opIds     = ops.map(o => o._id);
     const contagens = await Candidatura.aggregate([
       { $match: { oportunidade_id: { $in: opIds } } },
       { $group: { _id: "$oportunidade_id", total: { $sum: 1 } } },
@@ -1026,7 +952,6 @@ app.get("/oportunidades/minhas", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/** GET /oportunidades/:id — detalhe */
 app.get("/oportunidades/:id", auth, async (req, res) => {
   try {
     const op = await Oportunidade.findById(req.params.id).lean();
@@ -1039,7 +964,6 @@ app.get("/oportunidades/:id", auth, async (req, res) => {
   }
 });
 
-/** PUT /oportunidades/:id — editar */
 app.put("/oportunidades/:id", auth, soEmpresa, async (req, res) => {
   try {
     const op = await Oportunidade.findOne({ _id: req.params.id, empresa_id: req.user.id });
@@ -1054,7 +978,6 @@ app.put("/oportunidades/:id", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/** DELETE /oportunidades/:id — encerrar vaga */
 app.delete("/oportunidades/:id", auth, soEmpresa, async (req, res) => {
   try {
     const op = await Oportunidade.findOneAndUpdate(
@@ -1071,10 +994,6 @@ app.delete("/oportunidades/:id", auth, soEmpresa, async (req, res) => {
 
 // ====================== CANDIDATURAS ======================
 
-/**
- * POST /oportunidades/:id/interesse
- * Estudante demonstra interesse numa vaga
- */
 app.post("/oportunidades/:id/interesse", auth, soEstudante, async (req, res) => {
   try {
     const op = await Oportunidade.findById(req.params.id);
@@ -1086,9 +1005,7 @@ app.post("/oportunidades/:id/interesse", auth, soEstudante, async (req, res) => 
       estudante_id:    req.user.id,
     });
 
-    // Notifica a empresa
-    const estudante   = await Usuario.findById(req.user.id);
-    const empPerfil   = await Empresa.findOne({ usuario_id: op.empresa_id }).lean();
+    const estudante = await Usuario.findById(req.user.id);
     await criarNotificacao(
       op.empresa_id,
       "💌",
@@ -1105,7 +1022,6 @@ app.post("/oportunidades/:id/interesse", auth, soEstudante, async (req, res) => 
   }
 });
 
-/** GET /oportunidades/:id/candidatos — empresa vê candidatos */
 app.get("/oportunidades/:id/candidatos", auth, soEmpresa, async (req, res) => {
   try {
     const op = await Oportunidade.findOne({ _id: req.params.id, empresa_id: req.user.id });
@@ -1121,7 +1037,6 @@ app.get("/oportunidades/:id/candidatos", auth, soEmpresa, async (req, res) => {
     const usuMap  = Object.fromEntries(usuarios.map(u => [String(u._id), u]));
     const perfMap = Object.fromEntries(perfis.map(p => [String(p.usuario_id), p]));
 
-    // Médias de avaliação em batch
     const medias = await Avaliacao.aggregate([
       { $match: { avaliado_id: { $in: ids } } },
       { $group: { _id: "$avaliado_id", media: { $avg: "$nota" } } },
@@ -1159,10 +1074,6 @@ app.get("/oportunidades/:id/candidatos", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/**
- * PUT /candidaturas/:id/status
- * Body: { status: "em_andamento" | "concluido" | "recusado" | "visualizado" }
- */
 app.put("/candidaturas/:id/status", auth, soEmpresa, async (req, res) => {
   try {
     const { status } = req.body;
@@ -1180,7 +1091,6 @@ app.put("/candidaturas/:id/status", auth, soEmpresa, async (req, res) => {
     candidatura.atualizado_em = new Date();
     await candidatura.save();
 
-    // Notifica o estudante
     const notifMap = {
       em_andamento: { icon: "🚀", texto: `Projeto "${candidatura.oportunidade_id.titulo}" foi iniciado! Bom trabalho.` },
       concluido:    { icon: "🏆", texto: `Projeto "${candidatura.oportunidade_id.titulo}" concluído! Deixe sua avaliação.` },
@@ -1202,7 +1112,6 @@ app.put("/candidaturas/:id/status", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/** GET /candidaturas/minhas — estudante vê suas candidaturas */
 app.get("/candidaturas/minhas", auth, soEstudante, async (req, res) => {
   try {
     const candidaturas = await Candidatura.find({ estudante_id: req.user.id })
@@ -1238,13 +1147,8 @@ app.get("/candidaturas/minhas", auth, soEstudante, async (req, res) => {
   }
 });
 
-// ====================== TERMOS DE PROJETO ======================
+// ====================== TERMOS ======================
 
-/**
- * POST /termos
- * Empresa cria o termo ao publicar a vaga (ou ao iniciar)
- * Body: { candidatura_id, titulo, escopo, prazo, valor, responsavel }
- */
 app.post("/termos", auth, soEmpresa, async (req, res) => {
   try {
     const { candidatura_id, titulo, escopo, prazo, valor, responsavel } = req.body;
@@ -1269,7 +1173,6 @@ app.post("/termos", auth, soEmpresa, async (req, res) => {
       { upsert: true, new: true }
     );
 
-    // Notifica o estudante
     await criarNotificacao(
       candidatura.estudante_id,
       "📄",
@@ -1283,16 +1186,12 @@ app.post("/termos", auth, soEmpresa, async (req, res) => {
   }
 });
 
-/**
- * POST /termos/:id/aceitar
- * Estudante aceita o termo
- */
 app.post("/termos/:id/aceitar", auth, soEstudante, async (req, res) => {
   try {
     const termo = await Termo.findOne({
-      _id:         req.params.id,
+      _id:          req.params.id,
       estudante_id: req.user.id,
-      aceito:      false,
+      aceito:       false,
     });
     if (!termo) return res.status(404).json({ erro: "Termo não encontrado ou já aceito" });
 
@@ -1300,13 +1199,11 @@ app.post("/termos/:id/aceitar", auth, soEstudante, async (req, res) => {
     termo.aceito_em = new Date();
     await termo.save();
 
-    // Atualiza candidatura
     await Candidatura.findByIdAndUpdate(termo.candidatura_id, {
       termo_aceito:    true,
       termo_aceito_em: new Date(),
     });
 
-    // Notifica empresa
     const estudante = await Usuario.findById(req.user.id);
     await criarNotificacao(
       termo.empresa_id,
@@ -1321,13 +1218,11 @@ app.post("/termos/:id/aceitar", auth, soEstudante, async (req, res) => {
   }
 });
 
-/** GET /termos/candidatura/:candidatura_id — busca termo de uma candidatura */
 app.get("/termos/candidatura/:candidatura_id", auth, async (req, res) => {
   try {
     const termo = await Termo.findOne({ candidatura_id: req.params.candidatura_id });
     if (!termo) return res.status(404).json({ erro: "Termo não encontrado" });
 
-    // Verifica permissão (empresa dona ou estudante do termo)
     const pertence =
       String(termo.empresa_id) === String(req.user.id) ||
       String(termo.estudante_id) === String(req.user.id);
@@ -1341,10 +1236,6 @@ app.get("/termos/candidatura/:candidatura_id", auth, async (req, res) => {
 
 // ====================== AVALIAÇÕES ======================
 
-/**
- * POST /avaliacoes
- * Body: { candidatura_id, nota, comentario, ratings? }
- */
 app.post("/avaliacoes", auth, async (req, res) => {
   try {
     const { candidatura_id, nota, comentario, ratings } = req.body;
@@ -1376,11 +1267,10 @@ app.post("/avaliacoes", auth, async (req, res) => {
       avaliado_id,
       tipo,
       nota,
-      ratings:    ratings   || {},
+      ratings:    ratings    || {},
       comentario: comentario || "",
     });
 
-    // Notifica quem foi avaliado
     const avaliador = await Usuario.findById(req.user.id);
     await criarNotificacao(
       avaliado_id,
@@ -1398,7 +1288,6 @@ app.post("/avaliacoes", auth, async (req, res) => {
   }
 });
 
-/** GET /avaliacoes/:usuario_id — avaliações recebidas por um usuário */
 app.get("/avaliacoes/:usuario_id", auth, async (req, res) => {
   try {
     const avaliacoes = await Avaliacao.find({ avaliado_id: req.params.usuario_id })
@@ -1414,12 +1303,8 @@ app.get("/avaliacoes/:usuario_id", auth, async (req, res) => {
   }
 });
 
-// ====================== PESQUISA DE SATISFAÇÃO ======================
+// ====================== PESQUISA ======================
 
-/**
- * POST /pesquisas
- * Body: { candidatura_id, respostas: { contratar, rapido, expectativas } }
- */
 app.post("/pesquisas", auth, soEmpresa, async (req, res) => {
   try {
     const { candidatura_id, respostas } = req.body;
@@ -1446,10 +1331,6 @@ app.post("/pesquisas", auth, soEmpresa, async (req, res) => {
 
 // ====================== NOTIFICAÇÕES ======================
 
-/**
- * GET /notificacoes
- * Query: page, limit, lidas (true|false)
- */
 app.get("/notificacoes", auth, async (req, res) => {
   try {
     const { page = 1, limit = 20, lidas } = req.query;
@@ -1457,10 +1338,10 @@ app.get("/notificacoes", auth, async (req, res) => {
     if (lidas === "false") filtro.lida = false;
     if (lidas === "true")  filtro.lida = true;
 
-    const skip  = (parseInt(page) - 1) * parseInt(limit);
-    const total = await Notificacao.countDocuments(filtro);
+    const skip      = (parseInt(page) - 1) * parseInt(limit);
+    const total     = await Notificacao.countDocuments(filtro);
     const nao_lidas = await Notificacao.countDocuments({ usuario_id: req.user.id, lida: false });
-    const notifs = await Notificacao.find(filtro)
+    const notifs    = await Notificacao.find(filtro)
       .sort({ criado_em: -1 })
       .skip(skip)
       .limit(parseInt(limit))
@@ -1472,10 +1353,6 @@ app.get("/notificacoes", auth, async (req, res) => {
   }
 });
 
-/**
- * PATCH /notificacoes/marcar-lidas
- * Marca todas as notificações do usuário como lidas
- */
 app.patch("/notificacoes/marcar-lidas", auth, async (req, res) => {
   try {
     await Notificacao.updateMany(
@@ -1488,10 +1365,6 @@ app.patch("/notificacoes/marcar-lidas", auth, async (req, res) => {
   }
 });
 
-/**
- * PATCH /notificacoes/:id/ler
- * Marca uma notificação específica como lida
- */
 app.patch("/notificacoes/:id/ler", auth, async (req, res) => {
   try {
     const notif = await Notificacao.findOneAndUpdate(
@@ -1508,15 +1381,11 @@ app.patch("/notificacoes/:id/ler", auth, async (req, res) => {
 
 // ====================== STATS ======================
 
-/**
- * GET /stats
- * Dashboard: empresa vê stats das suas vagas; estudante vê stats pessoais
- */
 app.get("/stats", auth, async (req, res) => {
   try {
     if (req.user.tipo_usuario === "empresa") {
-      const ops    = await Oportunidade.find({ empresa_id: req.user.id }).lean();
-      const opIds  = ops.map(o => o._id);
+      const ops   = await Oportunidade.find({ empresa_id: req.user.id }).lean();
+      const opIds = ops.map(o => o._id);
 
       const [candidatos, ativos, concluidos, interesses] = await Promise.all([
         Candidatura.countDocuments({ oportunidade_id: { $in: opIds } }),
@@ -1528,34 +1397,32 @@ app.get("/stats", auth, async (req, res) => {
       const avaliacoes = await Avaliacao.find({ avaliado_id: req.user.id }).lean();
 
       return res.json({
-        vagas_publicadas:   ops.length,
-        vagas_ativas:       ops.filter(o => o.ativa).length,
-        total_candidatos:   candidatos,
-        projetos_ativos:    ativos,
+        vagas_publicadas:    ops.length,
+        vagas_ativas:        ops.filter(o => o.ativa).length,
+        total_candidatos:    candidatos,
+        projetos_ativos:     ativos,
         projetos_concluidos: concluidos,
         interesses_enviados: interesses,
-        media_nota:         calcMedia(avaliacoes),
-        total_avaliacoes:   avaliacoes.length,
+        media_nota:          calcMedia(avaliacoes),
+        total_avaliacoes:    avaliacoes.length,
       });
     }
 
-    // Estudante
     const candidaturas = await Candidatura.find({ estudante_id: req.user.id }).lean();
     const avaliacoes   = await Avaliacao.find({ avaliado_id: req.user.id }).lean();
     const interesses   = await Interesse.find({ estudante_id: req.user.id }).lean();
     const perfil       = await Estudante.findOne({ usuario_id: req.user.id }).lean();
-
-    const totalOps = await Oportunidade.countDocuments({ ativa: true });
+    const totalOps     = await Oportunidade.countDocuments({ ativa: true });
 
     res.json({
-      oportunidades_abertas:  totalOps,
-      interesses_enviados:    candidaturas.length,
-      interesses_recebidos:   interesses.length,
-      projetos_concluidos:    candidaturas.filter(c => c.status === "concluido").length,
-      projetos_ativos:        candidaturas.filter(c => c.status === "em_andamento").length,
-      media_nota:             calcMedia(avaliacoes),
-      total_avaliacoes:       avaliacoes.length,
-      projetos_portfolio:     perfil?.projetos_portfolio?.length || 0,
+      oportunidades_abertas: totalOps,
+      interesses_enviados:   candidaturas.length,
+      interesses_recebidos:  interesses.length,
+      projetos_concluidos:   candidaturas.filter(c => c.status === "concluido").length,
+      projetos_ativos:       candidaturas.filter(c => c.status === "em_andamento").length,
+      media_nota:            calcMedia(avaliacoes),
+      total_avaliacoes:      avaliacoes.length,
+      projetos_portfolio:    perfil?.projetos_portfolio?.length || 0,
     });
   } catch (err) {
     console.error("stats:", err);
@@ -1563,10 +1430,6 @@ app.get("/stats", auth, async (req, res) => {
   }
 });
 
-/**
- * GET /stats/plataforma
- * Métricas globais (tela Metricas do frontend — visível a empresas)
- */
 app.get("/stats/plataforma", auth, soEmpresa, async (req, res) => {
   try {
     const [
@@ -1585,7 +1448,7 @@ app.get("/stats/plataforma", auth, soEmpresa, async (req, res) => {
       Candidatura.countDocuments({ status: "em_andamento" }),
     ]);
 
-    const pesquisas  = await Pesquisa.find().lean();
+    const pesquisas = await Pesquisa.find().lean();
     const recontratarMedia = pesquisas.length
       ? (pesquisas.reduce((s, p) => s + (p.respostas?.contratar || 0), 0) / pesquisas.length).toFixed(1)
       : null;
@@ -1593,7 +1456,7 @@ app.get("/stats/plataforma", auth, soEmpresa, async (req, res) => {
     const avaliacoes = await Avaliacao.find().lean();
 
     res.json({
-      empresas_cadastradas: totalEmpresas,
+      empresas_cadastradas:  totalEmpresas,
       estudantes_cadastrados: totalEstudantes,
       vagas_publicadas:       totalVagas,
       total_candidaturas:     totalCandidaturas,
@@ -1601,12 +1464,11 @@ app.get("/stats/plataforma", auth, soEmpresa, async (req, res) => {
       projetos_ativos:        totalAtivos,
       media_nota_plataforma:  calcMedia(avaliacoes),
       taxa_recontratar:       recontratarMedia,
-      // Critérios fase 2
       fase2: {
-        empresas:    { atual: totalEmpresas,   meta: 10 },
-        estudantes:  { atual: totalEstudantes, meta: 50 },
-        concluidos:  { atual: totalConcluidos, meta: 5 },
-        nota:        { atual: calcMedia(avaliacoes), meta: 4 },
+        empresas:   { atual: totalEmpresas,   meta: 10 },
+        estudantes: { atual: totalEstudantes, meta: 50 },
+        concluidos: { atual: totalConcluidos, meta: 5 },
+        nota:       { atual: calcMedia(avaliacoes), meta: 4 },
       },
     });
   } catch (err) {
@@ -1614,40 +1476,34 @@ app.get("/stats/plataforma", auth, soEmpresa, async (req, res) => {
     res.status(500).json({ erro: "Erro interno" });
   }
 });
-// ── Mensagem de Chat ───────────────────────────────────────
-const mensagemSchema = new mongoose.Schema({
-  conversa_id:  { type: String, required: true, index: true },
-  remetente_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
-  destinatario_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
-  texto:        { type: String, required: true, maxlength: 2000, trim: true },
-  lida:         { type: Boolean, default: false },
-  criado_em:    { type: Date, default: Date.now },
-});
-mensagemSchema.index({ conversa_id: 1, criado_em: 1 });
-mensagemSchema.index({ destinatario_id: 1, lida: 1 });
 
-const Mensagem = mongoose.model("Mensagem", mensagemSchema);
 // ====================== CHAT ======================
 
-// Gera conversa_id estável entre dois usuários (menor id primeiro)
 function gerarConversaId(idA, idB) {
   const a = String(idA);
   const b = String(idB);
   return a < b ? `${a}_${b}` : `${b}_${a}`;
 }
 
-/**
- * GET /chat/conversas
- * Lista todas as conversas do usuário logado com preview da última mensagem
- */
+app.get("/chat/nao-lidas/total", auth, async (req, res) => {
+  try {
+    const total = await Mensagem.countDocuments({
+      destinatario_id: req.user.id,
+      lida: false,
+    });
+    res.json({ total });
+  } catch (err) {
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
+
 app.get("/chat/conversas", auth, async (req, res) => {
   try {
-    // Busca última mensagem de cada conversa onde o usuário participa
     const conversas = await Mensagem.aggregate([
       {
         $match: {
           $or: [
-            { remetente_id: new mongoose.Types.ObjectId(req.user.id) },
+            { remetente_id:    new mongoose.Types.ObjectId(req.user.id) },
             { destinatario_id: new mongoose.Types.ObjectId(req.user.id) },
           ],
         },
@@ -1655,7 +1511,7 @@ app.get("/chat/conversas", auth, async (req, res) => {
       { $sort: { criado_em: -1 } },
       {
         $group: {
-          _id: "$conversa_id",
+          _id:             "$conversa_id",
           ultima_mensagem: { $first: "$texto" },
           ultima_data:     { $first: "$criado_em" },
           remetente_id:    { $first: "$remetente_id" },
@@ -1665,9 +1521,8 @@ app.get("/chat/conversas", auth, async (req, res) => {
       { $sort: { ultima_data: -1 } },
     ]);
 
-    // Para cada conversa, identificar o "outro" usuário
     const outrosIds = conversas.map(c => {
-      const rem = String(c.remetente_id);
+      const rem  = String(c.remetente_id);
       const dest = String(c.destinatario_id);
       return rem === String(req.user.id) ? dest : rem;
     });
@@ -1678,11 +1533,10 @@ app.get("/chat/conversas", auth, async (req, res) => {
       Empresa.find({ usuario_id: { $in: outrosIds } }).lean(),
     ]);
 
-    const usuMap  = Object.fromEntries(usuarios.map(u => [String(u._id), u]));
-    const estMap  = Object.fromEntries(estudantes.map(e => [String(e.usuario_id), e]));
-    const empMap  = Object.fromEntries(empresas.map(e => [String(e.usuario_id), e]));
+    const usuMap = Object.fromEntries(usuarios.map(u => [String(u._id), u]));
+    const estMap = Object.fromEntries(estudantes.map(e => [String(e.usuario_id), e]));
+    const empMap = Object.fromEntries(empresas.map(e => [String(e.usuario_id), e]));
 
-    // Contagem de não lidas por conversa
     const naoLidasAgg = await Mensagem.aggregate([
       {
         $match: {
@@ -1710,14 +1564,14 @@ app.get("/chat/conversas", auth, async (req, res) => {
       const foto = estPerf?.foto || empPerf?.foto || "";
 
       return {
-        conversa_id:      c._id,
-        outro_id:         outroId,
-        outro_nome:       nome,
-        outro_tipo:       outro.tipo_usuario || "",
-        outro_foto:       foto,
-        ultima_mensagem:  c.ultima_mensagem,
-        ultima_data:      c.ultima_data,
-        nao_lidas:        naoLidasMap[c._id] || 0,
+        conversa_id:     c._id,
+        outro_id:        outroId,
+        outro_nome:      nome,
+        outro_tipo:      outro.tipo_usuario || "",
+        outro_foto:      foto,
+        ultima_mensagem: c.ultima_mensagem,
+        ultima_data:     c.ultima_data,
+        nao_lidas:       naoLidasMap[c._id] || 0,
       };
     });
 
@@ -1728,11 +1582,6 @@ app.get("/chat/conversas", auth, async (req, res) => {
   }
 });
 
-/**
- * GET /chat/:outro_id
- * Busca mensagens de uma conversa entre o usuário logado e outro_id
- * Query: antes (ISO date para paginação reversa), limit
- */
 app.get("/chat/:outro_id", auth, async (req, res) => {
   try {
     const { antes, limit = 40 } = req.query;
@@ -1746,7 +1595,6 @@ app.get("/chat/:outro_id", auth, async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Marca como lidas as mensagens destinadas ao usuário atual
     await Mensagem.updateMany(
       { conversa_id: conversaId, destinatario_id: req.user.id, lida: false },
       { $set: { lida: true } }
@@ -1759,11 +1607,6 @@ app.get("/chat/:outro_id", auth, async (req, res) => {
   }
 });
 
-/**
- * POST /chat/:outro_id
- * Envia mensagem para outro_id
- * Body: { texto }
- */
 app.post("/chat/:outro_id", auth, async (req, res) => {
   try {
     const { texto } = req.body;
@@ -1775,9 +1618,13 @@ app.post("/chat/:outro_id", auth, async (req, res) => {
     if (!outro || !outro.ativo)
       return res.status(404).json({ erro: "Usuário não encontrado" });
 
-    // Apenas permite chat entre empresa e estudante (não empresa↔empresa ou estudante↔estudante)
-    if (req.user.tipo_usuario === outro.tipo_usuario)
-      return res.status(403).json({ erro: "Chat permitido apenas entre empresa e estudante" });
+    // Verifica se o remetente está bloqueado pelo destinatário
+    const bloqueio = await Bloqueio.findOne({
+      bloqueador_id: outroId,
+      bloqueado_id:  req.user.id,
+    });
+    if (bloqueio)
+      return res.status(403).json({ erro: "Você não pode enviar mensagens para este usuário" });
 
     const conversaId = gerarConversaId(req.user.id, outroId);
 
@@ -1788,11 +1635,11 @@ app.post("/chat/:outro_id", auth, async (req, res) => {
       texto:           texto.trim(),
     });
 
-    // Notificação apenas se a última mensagem for antiga (> 5 min) ou não existir
+    // Notificação apenas se não houver mensagem recente (> 5 min)
     const recente = await Mensagem.findOne({
-      conversa_id: conversaId,
+      conversa_id:  conversaId,
       remetente_id: req.user.id,
-      criado_em: { $gt: new Date(Date.now() - 5 * 60 * 1000) },
+      criado_em:    { $gt: new Date(Date.now() - 5 * 60 * 1000) },
     }).sort({ criado_em: -1 }).skip(1).lean();
 
     if (!recente) {
@@ -1812,17 +1659,45 @@ app.post("/chat/:outro_id", auth, async (req, res) => {
   }
 });
 
-/**
- * GET /chat/nao-lidas/total
- * Total de mensagens não lidas do usuário — usado pelo badge no nav
- */
-app.get("/chat/nao-lidas/total", auth, async (req, res) => {
+// ====================== BLOQUEIO ======================
+
+app.post("/chat/:outro_id/bloquear", auth, async (req, res) => {
   try {
-    const total = await Mensagem.countDocuments({
-      destinatario_id: req.user.id,
-      lida: false,
+    if (String(req.params.outro_id) === String(req.user.id))
+      return res.status(400).json({ erro: "Você não pode bloquear a si mesmo" });
+
+    await Bloqueio.findOneAndUpdate(
+      { bloqueador_id: req.user.id, bloqueado_id: req.params.outro_id },
+      { bloqueador_id: req.user.id, bloqueado_id: req.params.outro_id },
+      { upsert: true, new: true }
+    );
+    res.json({ mensagem: "Usuário bloqueado com sucesso" });
+  } catch (err) {
+    console.error("bloquear:", err);
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
+
+app.delete("/chat/:outro_id/bloquear", auth, async (req, res) => {
+  try {
+    await Bloqueio.findOneAndDelete({
+      bloqueador_id: req.user.id,
+      bloqueado_id:  req.params.outro_id,
     });
-    res.json({ total });
+    res.json({ mensagem: "Usuário desbloqueado" });
+  } catch (err) {
+    console.error("desbloquear:", err);
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
+
+app.get("/chat/:outro_id/bloqueio", auth, async (req, res) => {
+  try {
+    const bloqueio = await Bloqueio.findOne({
+      bloqueador_id: req.user.id,
+      bloqueado_id:  req.params.outro_id,
+    });
+    res.json({ bloqueado: !!bloqueio });
   } catch (err) {
     res.status(500).json({ erro: "Erro interno" });
   }
@@ -1842,4 +1717,4 @@ app.use((err, req, res, next) => {
 // ====================== START ======================
 
 const PORT = parseInt(process.env.PORT) || 10000;
-app.listen(PORT, () => console.log(`🚀 RecrutÁgil v2 rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 RecrutÁgil v2.1 rodando na porta ${PORT}`));
