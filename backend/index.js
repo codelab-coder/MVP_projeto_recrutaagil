@@ -1614,6 +1614,219 @@ app.get("/stats/plataforma", auth, soEmpresa, async (req, res) => {
     res.status(500).json({ erro: "Erro interno" });
   }
 });
+// ── Mensagem de Chat ───────────────────────────────────────
+const mensagemSchema = new mongoose.Schema({
+  conversa_id:  { type: String, required: true, index: true },
+  remetente_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
+  destinatario_id: { type: mongoose.Schema.Types.ObjectId, ref: "Usuario", required: true },
+  texto:        { type: String, required: true, maxlength: 2000, trim: true },
+  lida:         { type: Boolean, default: false },
+  criado_em:    { type: Date, default: Date.now },
+});
+mensagemSchema.index({ conversa_id: 1, criado_em: 1 });
+mensagemSchema.index({ destinatario_id: 1, lida: 1 });
+
+const Mensagem = mongoose.model("Mensagem", mensagemSchema);
+// ====================== CHAT ======================
+
+// Gera conversa_id estável entre dois usuários (menor id primeiro)
+function gerarConversaId(idA, idB) {
+  const a = String(idA);
+  const b = String(idB);
+  return a < b ? `${a}_${b}` : `${b}_${a}`;
+}
+
+/**
+ * GET /chat/conversas
+ * Lista todas as conversas do usuário logado com preview da última mensagem
+ */
+app.get("/chat/conversas", auth, async (req, res) => {
+  try {
+    // Busca última mensagem de cada conversa onde o usuário participa
+    const conversas = await Mensagem.aggregate([
+      {
+        $match: {
+          $or: [
+            { remetente_id: new mongoose.Types.ObjectId(req.user.id) },
+            { destinatario_id: new mongoose.Types.ObjectId(req.user.id) },
+          ],
+        },
+      },
+      { $sort: { criado_em: -1 } },
+      {
+        $group: {
+          _id: "$conversa_id",
+          ultima_mensagem: { $first: "$texto" },
+          ultima_data:     { $first: "$criado_em" },
+          remetente_id:    { $first: "$remetente_id" },
+          destinatario_id: { $first: "$destinatario_id" },
+        },
+      },
+      { $sort: { ultima_data: -1 } },
+    ]);
+
+    // Para cada conversa, identificar o "outro" usuário
+    const outrosIds = conversas.map(c => {
+      const rem = String(c.remetente_id);
+      const dest = String(c.destinatario_id);
+      return rem === String(req.user.id) ? dest : rem;
+    });
+
+    const [usuarios, estudantes, empresas] = await Promise.all([
+      Usuario.find({ _id: { $in: outrosIds } }).lean(),
+      Estudante.find({ usuario_id: { $in: outrosIds } }).lean(),
+      Empresa.find({ usuario_id: { $in: outrosIds } }).lean(),
+    ]);
+
+    const usuMap  = Object.fromEntries(usuarios.map(u => [String(u._id), u]));
+    const estMap  = Object.fromEntries(estudantes.map(e => [String(e.usuario_id), e]));
+    const empMap  = Object.fromEntries(empresas.map(e => [String(e.usuario_id), e]));
+
+    // Contagem de não lidas por conversa
+    const naoLidasAgg = await Mensagem.aggregate([
+      {
+        $match: {
+          destinatario_id: new mongoose.Types.ObjectId(req.user.id),
+          lida: false,
+        },
+      },
+      { $group: { _id: "$conversa_id", total: { $sum: 1 } } },
+    ]);
+    const naoLidasMap = Object.fromEntries(naoLidasAgg.map(x => [x._id, x.total]));
+
+    const resultado = conversas.map(c => {
+      const outroId = String(c.remetente_id) === String(req.user.id)
+        ? String(c.destinatario_id)
+        : String(c.remetente_id);
+
+      const outro   = usuMap[outroId] || {};
+      const estPerf = estMap[outroId];
+      const empPerf = empMap[outroId];
+
+      const nome = outro.tipo_usuario === "empresa"
+        ? (empPerf?.nome_empresa || outro.nome || "")
+        : (outro.nome || "");
+
+      const foto = estPerf?.foto || empPerf?.foto || "";
+
+      return {
+        conversa_id:      c._id,
+        outro_id:         outroId,
+        outro_nome:       nome,
+        outro_tipo:       outro.tipo_usuario || "",
+        outro_foto:       foto,
+        ultima_mensagem:  c.ultima_mensagem,
+        ultima_data:      c.ultima_data,
+        nao_lidas:        naoLidasMap[c._id] || 0,
+      };
+    });
+
+    res.json({ conversas: resultado });
+  } catch (err) {
+    console.error("chat/conversas:", err);
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
+
+/**
+ * GET /chat/:outro_id
+ * Busca mensagens de uma conversa entre o usuário logado e outro_id
+ * Query: antes (ISO date para paginação reversa), limit
+ */
+app.get("/chat/:outro_id", auth, async (req, res) => {
+  try {
+    const { antes, limit = 40 } = req.query;
+    const conversaId = gerarConversaId(req.user.id, req.params.outro_id);
+
+    const filtro = { conversa_id: conversaId };
+    if (antes) filtro.criado_em = { $lt: new Date(antes) };
+
+    const mensagens = await Mensagem.find(filtro)
+      .sort({ criado_em: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Marca como lidas as mensagens destinadas ao usuário atual
+    await Mensagem.updateMany(
+      { conversa_id: conversaId, destinatario_id: req.user.id, lida: false },
+      { $set: { lida: true } }
+    );
+
+    res.json({ mensagens: mensagens.reverse(), conversa_id: conversaId });
+  } catch (err) {
+    console.error("chat/get:", err);
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
+
+/**
+ * POST /chat/:outro_id
+ * Envia mensagem para outro_id
+ * Body: { texto }
+ */
+app.post("/chat/:outro_id", auth, async (req, res) => {
+  try {
+    const { texto } = req.body;
+    if (!texto || !texto.trim())
+      return res.status(400).json({ erro: "Mensagem não pode estar vazia" });
+
+    const outroId = req.params.outro_id;
+    const outro   = await Usuario.findById(outroId);
+    if (!outro || !outro.ativo)
+      return res.status(404).json({ erro: "Usuário não encontrado" });
+
+    // Apenas permite chat entre empresa e estudante (não empresa↔empresa ou estudante↔estudante)
+    if (req.user.tipo_usuario === outro.tipo_usuario)
+      return res.status(403).json({ erro: "Chat permitido apenas entre empresa e estudante" });
+
+    const conversaId = gerarConversaId(req.user.id, outroId);
+
+    const mensagem = await Mensagem.create({
+      conversa_id:     conversaId,
+      remetente_id:    req.user.id,
+      destinatario_id: outroId,
+      texto:           texto.trim(),
+    });
+
+    // Notificação apenas se a última mensagem for antiga (> 5 min) ou não existir
+    const recente = await Mensagem.findOne({
+      conversa_id: conversaId,
+      remetente_id: req.user.id,
+      criado_em: { $gt: new Date(Date.now() - 5 * 60 * 1000) },
+    }).sort({ criado_em: -1 }).skip(1).lean();
+
+    if (!recente) {
+      const remetente = await Usuario.findById(req.user.id);
+      let nomeRem = remetente.nome;
+      if (remetente.tipo_usuario === "empresa") {
+        const empPerf = await Empresa.findOne({ usuario_id: req.user.id }).lean();
+        if (empPerf?.nome_empresa) nomeRem = empPerf.nome_empresa;
+      }
+      await criarNotificacao(outroId, "💬", `Nova mensagem de ${nomeRem}`, "chat");
+    }
+
+    res.status(201).json({ mensagem });
+  } catch (err) {
+    console.error("chat/post:", err);
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
+
+/**
+ * GET /chat/nao-lidas/total
+ * Total de mensagens não lidas do usuário — usado pelo badge no nav
+ */
+app.get("/chat/nao-lidas/total", auth, async (req, res) => {
+  try {
+    const total = await Mensagem.countDocuments({
+      destinatario_id: req.user.id,
+      lida: false,
+    });
+    res.json({ total });
+  } catch (err) {
+    res.status(500).json({ erro: "Erro interno" });
+  }
+});
 
 // ====================== 404 / ERROR HANDLER ======================
 
